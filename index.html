@@ -3,45 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>1:1 BIOS Screen</title>
+    <title>LandenOS</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
     <style>
         body {
-            background-color: #000000;
-            color: #aaaaaa; /* Authentic BIOS light gray */
+            background: #000;
+            color: #aaa;
             font-family: 'VT323', monospace;
-            
-            /* Scales font dynamically so ~80 chars fit screen width */
             font-size: 2.2vw;
             line-height: 1;
             margin: 0;
             padding: 8px;
-
-            /* Disables browser font smoothing for sharp pixel edges */
+            height: 100vh;
+            box-sizing: border-box;
+            user-select: none;
             -webkit-font-smoothing: none;
             -moz-osx-font-smoothing: grayscale;
             text-rendering: optimizeSpeed;
         }
 
-        /* Blinking hardware cursor */
         .cursor {
             display: inline-block;
             width: 0.5em;
             height: 0.15em;
-            background-color: #aaaaaa;
+            background: #aaa;
             vertical-align: bottom;
             animation: blink 1s step-end infinite;
         }
 
         @keyframes blink {
-            0%, 100% { opacity: 1; }
             50% { opacity: 0; }
         }
     </style>
 </head>
 <body>
     Hello, World!<span class="cursor"></span>
+
+    <script>
+        window.addEventListener('click', () => {
+            if (!document.pointerLockElement) {
+                document.body.requestPointerLock();
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (document.pointerLockElement === document.body) {
+                if (e.key === 'Escape') {
+                    document.exitPointerLock();
+                } else {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }
+        }, true);
+    </script>
 </body>
 </html>
