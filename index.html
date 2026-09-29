@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
     <style>
-        body {
+        html, body {
             background: #000;
             color: #aaa;
             font-family: 'VT323', monospace;
@@ -19,9 +19,24 @@
             height: 100vh;
             box-sizing: border-box;
             user-select: none;
+            letter-spacing: 0.05vw;
+            overflow: hidden;
             -webkit-font-smoothing: none;
             -moz-osx-font-smoothing: grayscale;
             text-rendering: optimizeSpeed;
+        }
+
+        #terminal {
+            height: 100%;
+            overflow: hidden;
+        }
+
+        #terminal div {
+            margin: 0;
+            padding: 0;
+            line-height: 1;
+            white-space: pre-wrap;
+            word-break: break-all;
         }
 
         .cursor {
@@ -39,9 +54,23 @@
     </style>
 </head>
 <body>
-    Hello, World!<span class="cursor"></span>
+    <div id="terminal">
+        <div>Welcome to LandenOS!</div>
+        <div class="line">&gt;&gt;&gt; <span class="input"></span><span class="cursor"></span></div>
+    </div>
 
     <script>
+        let buffer = '';
+        const MAX_INPUT = 76;
+        const terminal = document.getElementById('terminal');
+
+        function scrollToBottom() {
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        window.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
+        window.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
         window.addEventListener('click', () => {
             if (!document.pointerLockElement) {
                 document.body.requestPointerLock();
@@ -52,9 +81,40 @@
             if (document.pointerLockElement === document.body) {
                 if (e.key === 'Escape') {
                     document.exitPointerLock();
-                } else {
-                    e.preventDefault();
-                    e.stopPropagation();
+                    return;
+                }
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                const activeLine = terminal.lastElementChild;
+                const inputSpan = activeLine.querySelector('.input');
+                const cursor = activeLine.querySelector('.cursor');
+
+                if (e.key === 'Enter') {
+                    cursor.remove();
+                    
+                    const echo = document.createElement('div');
+                    echo.textContent = buffer;
+                    terminal.appendChild(echo);
+
+                    const nextLine = document.createElement('div');
+                    nextLine.className = 'line';
+                    nextLine.innerHTML = '&gt;&gt;&gt; <span class="input"></span><span class="cursor"></span>';
+                    terminal.appendChild(nextLine);
+
+                    buffer = '';
+                    scrollToBottom();
+                } else if (e.key === 'Backspace') {
+                    buffer = buffer.slice(0, -1);
+                    inputSpan.textContent = buffer;
+                    scrollToBottom();
+                } else if (e.key.length === 1) {
+                    if (buffer.length < MAX_INPUT) {
+                        buffer += e.key;
+                        inputSpan.textContent = buffer;
+                        scrollToBottom();
+                    }
                 }
             }
         }, true);
