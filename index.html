@@ -94,9 +94,13 @@
                 if (e.key === 'Enter') {
                     cursor.remove();
                     
-                    const echo = document.createElement('div');
-                    echo.textContent = buffer;
-                    terminal.appendChild(echo);
+                    if (buffer === '\\cleans') {
+                        terminal.innerHTML = '';
+                    } else {
+                        const echo = document.createElement('div');
+                        echo.textContent = buffer;
+                        terminal.appendChild(echo);
+                    }
 
                     const nextLine = document.createElement('div');
                     nextLine.className = 'line';
