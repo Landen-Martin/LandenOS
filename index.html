@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1:1 BIOS Screen</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #000000;
+            color: #aaaaaa; /* Authentic BIOS light gray */
+            font-family: 'VT323', monospace;
+            
+            /* Scales font dynamically so ~80 chars fit screen width */
+            font-size: 2.2vw;
+            line-height: 1;
+            margin: 0;
+            padding: 8px;
+
+            /* Disables browser font smoothing for sharp pixel edges */
+            -webkit-font-smoothing: none;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeSpeed;
+        }
+
+        /* Blinking hardware cursor */
+        .cursor {
+            display: inline-block;
+            width: 0.5em;
+            height: 0.15em;
+            background-color: #aaaaaa;
+            vertical-align: bottom;
+            animation: blink 1s step-end infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+    Hello, World!<span class="cursor"></span>
+</body>
+</html>
