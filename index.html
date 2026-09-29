@@ -56,6 +56,7 @@
 <body>
     <div id="terminal">
         <div>Welcome to LandenOS!</div>
+        <div>Type `\help` for help</div>
         <div class="line">&gt;&gt;&gt; <span class="input"></span><span class="cursor"></span></div>
     </div>
 
@@ -63,6 +64,31 @@
         let buffer = '';
         const MAX_INPUT = 76;
         const terminal = document.getElementById('terminal');
+
+        const OS = {
+            version: "1.0.0",
+            commands: {
+                '\\help': () => [
+                    'LandenOS Command List:',
+                    '  \\help   - Display available system commands',
+                    '  \\cleans - Clear terminal screen output'
+                ],
+                '\\cleans': () => {
+                    terminal.innerHTML = '';
+                    return null;
+                }
+            },
+            execute(input) {
+                const cmd = input.trim();
+                if (this.commands[cmd]) {
+                    return this.commands[cmd]();
+                }
+                if (cmd.startsWith('\\')) {
+                    return [`[warng] \`${cmd}\` is not a command! Type \`\\help\` for a list of commands.`];
+                }
+                return [input];
+            }
+        };
 
         function scrollToBottom() {
             terminal.scrollTop = terminal.scrollHeight;
@@ -94,12 +120,13 @@
                 if (e.key === 'Enter') {
                     cursor.remove();
                     
-                    if (buffer === '\\cleans') {
-                        terminal.innerHTML = '';
-                    } else {
-                        const echo = document.createElement('div');
-                        echo.textContent = buffer;
-                        terminal.appendChild(echo);
+                    const output = OS.execute(buffer);
+                    if (output !== null) {
+                        output.forEach(text => {
+                            const line = document.createElement('div');
+                            line.textContent = text;
+                            terminal.appendChild(line);
+                        });
                     }
 
                     const nextLine = document.createElement('div');
