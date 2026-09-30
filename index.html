@@ -66,7 +66,7 @@
         const terminal = document.getElementById('terminal');
 
         const OS = {
-            version: "1.0.0",
+            version: "alpha v1.0.1.1790775279",
             executeSingle(input, pipedData = null) {
                 const raw = input.trim();
                 if (!raw) return [];
@@ -81,15 +81,61 @@
                 }
 
                 if (cmd === 'help') {
-                    if (args) {
-                        return [`[error] The command \`${cmd}\` received too many arguments!`];
+                    if (!args) {
+                        return [
+                            'LandenOS Command List:',
+                            '  help        - Display available system commands',
+                            '  cleans      - Clear terminal screen output',
+                            '  echo `text` - Print text to screen'
+                        ];
                     }
-                    return [
-                        'LandenOS Command List:',
-                        '  help        - Display available system commands',
-                        '  cleans      - Clear terminal screen output',
-                        '  echo `text` - Print text to screen'
-                    ];
+                    if (args === '-v') {
+                        return [`LandenOS Version: ${this.version}`];
+                    }
+                    if (args === '-f') {
+                        return [
+                            'LandenOS Help Flags:',
+                            '  -v - Display current OS version',
+                            '  -f - Display available help flags'
+                        ];
+                    }
+                    if (args.startsWith('`')) {
+                        const closingIndex = args.indexOf('`', 1);
+                        if (closingIndex === -1) {
+                            return [`[error] Syntax error in \`${cmd}\`: Target command must be enclosed in backticks (\`cmd\`).`];
+                        }
+                        const targetCmd = args.substring(1, closingIndex).trim();
+                        const flag = args.substring(closingIndex + 1).trim();
+
+                        const validCommands = ['help', 'cleans', 'echo'];
+                        if (!validCommands.includes(targetCmd)) {
+                            return [`[error] \`${targetCmd}\` is not a command!`];
+                        }
+
+                        if (!flag) {
+                            if (targetCmd === 'help') return ['help - Displays system commands and flags. Usage: help [-v|-f] or help `cmd` [-f]'];
+                            if (targetCmd === 'cleans') return ['cleans - Clears screen output. Usage: cleans'];
+                            if (targetCmd === 'echo') return ['echo - Outputs backtick-enclosed text to screen. Usage: echo `text`'];
+                        } else if (flag === '-f') {
+                            if (targetCmd === 'help') {
+                                return [
+                                    'Flags for `help`:',
+                                    '  -v - Display current OS version',
+                                    '  -f - Display available help flags'
+                                ];
+                            } else if (targetCmd === 'echo') {
+                                return ['Flags for `echo`:', '  (None available)'];
+                            } else if (targetCmd === 'cleans') {
+                                return ['Flags for `cleans`:', '  (None available)'];
+                            }
+                        } else {
+                            return [`[error] Unknown flag \`${flag}\` for \`help \`${targetCmd}\`\`!`];
+                        }
+                    }
+                    if (args.startsWith('-')) {
+                        return [`[error] Unknown flag \`${args}\` for \`help\`!`];
+                    }
+                    return [`[error] The command \`${cmd}\` received invalid arguments!`];
                 }
 
                 if (cmd === 'cleans') {
