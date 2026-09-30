@@ -67,7 +67,7 @@
 
         const OS = {
             version: "1.0.0",
-            executeSingle(input) {
+            executeSingle(input, pipedData = null) {
                 const raw = input.trim();
                 if (!raw) return [];
 
@@ -102,6 +102,9 @@
 
                 if (cmd === 'echo') {
                     if (!args) {
+                        if (pipedData !== null && pipedData.length > 0) {
+                            return pipedData;
+                        }
                         return [`[error] The command \`${cmd}\` requiters more arguments then you inputed!`];
                     }
                     if (args.startsWith('`')) {
@@ -119,6 +122,41 @@
                 }
 
                 return [`[error] \`${cmd}\` is not a command! Type \`help\` for a list of commands.`];
+            },
+
+            executePipeline(pipelineStr) {
+                const pipeCmds = [];
+                let current = '';
+                let inBacktick = false;
+
+                for (let i = 0; i < pipelineStr.length; i++) {
+                    const char = pipelineStr[i];
+                    if (char === '`') {
+                        inBacktick = !inBacktick;
+                        current += char;
+                    } else if (!inBacktick && char === '|') {
+                        pipeCmds.push(current);
+                        current = '';
+                    } else {
+                        current += char;
+                    }
+                }
+                pipeCmds.push(current);
+
+                let currentOutput = null;
+
+                for (const cmdStr of pipeCmds) {
+                    if (!cmdStr.trim()) continue;
+                    currentOutput = this.executeSingle(cmdStr, currentOutput);
+                    if (currentOutput === null) {
+                        break;
+                    }
+                    if (currentOutput.length > 0 && currentOutput[0].startsWith('[error]')) {
+                        break;
+                    }
+                }
+
+                return currentOutput;
             },
 
             execute(input) {
@@ -163,7 +201,7 @@
 
                 for (const cmdStr of rawCommands) {
                     if (!cmdStr.trim()) continue;
-                    const output = this.executeSingle(cmdStr);
+                    const output = this.executePipeline(cmdStr);
                     if (output === null) {
                         combinedOutput = [];
                         isCleared = true;
