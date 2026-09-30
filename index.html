@@ -67,7 +67,7 @@
 
         const OS = {
             version: "1.0.0",
-            execute(input) {
+            executeSingle(input) {
                 const raw = input.trim();
                 if (!raw) return [];
 
@@ -119,6 +119,63 @@
                 }
 
                 return [`[error] \`${cmd}\` is not a command! Type \`help\` for a list of commands.`];
+            },
+
+            execute(input) {
+                // Check for unsupported double-symbol operators outside backticks
+                let checkBacktick = false;
+                for (let i = 0; i < input.length - 1; i++) {
+                    const char = input[i];
+                    if (char === '`') {
+                        checkBacktick = !checkBacktick;
+                    } else if (!checkBacktick) {
+                        const nextChar = input[i + 1];
+                        if (char === nextChar && /[^\w\s`]/.test(char)) {
+                            if (char !== '&') {
+                                const badOp = char + nextChar;
+                                return [`[error] Unsupported command operator \`${badOp}\`! Use \`&&\` to chain commands.`];
+                            }
+                        }
+                    }
+                }
+
+                const rawCommands = [];
+                let current = '';
+                let inBacktick = false;
+
+                for (let i = 0; i < input.length; i++) {
+                    const char = input[i];
+                    if (char === '`') {
+                        inBacktick = !inBacktick;
+                        current += char;
+                    } else if (!inBacktick && char === '&' && input[i + 1] === '&') {
+                        rawCommands.push(current);
+                        current = '';
+                        i++;
+                    } else {
+                        current += char;
+                    }
+                }
+                rawCommands.push(current);
+
+                let combinedOutput = [];
+                let isCleared = false;
+
+                for (const cmdStr of rawCommands) {
+                    if (!cmdStr.trim()) continue;
+                    const output = this.executeSingle(cmdStr);
+                    if (output === null) {
+                        combinedOutput = [];
+                        isCleared = true;
+                    } else {
+                        combinedOutput.push(...output);
+                    }
+                }
+
+                if (isCleared && combinedOutput.length === 0) {
+                    return null;
+                }
+                return combinedOutput;
             }
         };
 
