@@ -66,8 +66,12 @@
         const terminal = document.getElementById('terminal');
 
         const OS = {
-            version: "alpha v1.0.1.1790775279",
+            version: "alpha v1.0.1.1790777229",
+            sysInfo: "LandenOS v1.0.0 | x86_64 Virtual Engine | 640KB Base RAM / 16MB Total | VGA Display 80x25",
+            isPoweredOn: true,
+
             executeSingle(input, pipedData = null) {
+                if (!this.isPoweredOn) return null;
                 const raw = input.trim();
                 if (!raw) return [];
 
@@ -80,24 +84,32 @@
                     args = raw.substring(spaceIndex + 1).trim();
                 }
 
+                // HELP
                 if (cmd === 'help') {
                     if (!args) {
                         return [
                             'LandenOS Command List:',
                             '  help        - Display available system commands',
                             '  cleans      - Clear terminal screen output',
-                            '  echo `text` - Print text to screen'
+                            '  echo `text` - Print text to screen',
+                            '  time        - Display Unix timestamp or formatted date/time',
+                            '  test        - Run system diagnostic tests',
+                            '  boot        - Control system power and reboot state',
+                            '  sys         - Display full system information or version'
                         ];
                     }
-                    if (args === '-v') {
-                        return [`LandenOS Version: ${this.version}`];
+                    if (args === '-h') {
+                        return ['help - Displays help menu or flag info. Usage: help [-f|-h] or help `cmd` [-f|-h]'];
                     }
                     if (args === '-f') {
                         return [
                             'LandenOS Help Flags:',
-                            '  -v - Display current OS version',
-                            '  -f - Display available help flags'
+                            '  -f - List available help flags',
+                            '  -h - Display help for the help command'
                         ];
+                    }
+                    if (args === '-v') {
+                        return ['[error] Flag `-v` moved to `sys -v`! Use `sys -v` for version.'];
                     }
                     if (args.startsWith('`')) {
                         const closingIndex = args.indexOf('`', 1);
@@ -107,27 +119,27 @@
                         const targetCmd = args.substring(1, closingIndex).trim();
                         const flag = args.substring(closingIndex + 1).trim();
 
-                        const validCommands = ['help', 'cleans', 'echo'];
+                        const validCommands = ['help', 'cleans', 'echo', 'time', 'test', 'boot', 'sys'];
                         if (!validCommands.includes(targetCmd)) {
                             return [`[error] \`${targetCmd}\` is not a command!`];
                         }
 
-                        if (!flag) {
-                            if (targetCmd === 'help') return ['help - Displays system commands and flags. Usage: help [-v|-f] or help `cmd` [-f]'];
-                            if (targetCmd === 'cleans') return ['cleans - Clears screen output. Usage: cleans'];
-                            if (targetCmd === 'echo') return ['echo - Outputs backtick-enclosed text to screen. Usage: echo `text`'];
+                        if (!flag || flag === '-h') {
+                            if (targetCmd === 'help') return ['help - Display system commands and flags. Usage: help [-f|-h] or help `cmd` [-f|-h]'];
+                            if (targetCmd === 'cleans') return ['cleans - Clears all terminal screen output. Usage: cleans [-h]'];
+                            if (targetCmd === 'echo') return ['echo - Outputs text or processes piped input. Usage: echo `text` [-h]'];
+                            if (targetCmd === 'time') return ['time - Displays Unix timestamp, date, or time. Usage: time [-r|-t|-d|-h]'];
+                            if (targetCmd === 'test') return ['test - Diagnostics runner for system hardware. Usage: test [-c|-s|-r|-v|-h]'];
+                            if (targetCmd === 'boot') return ['boot - Controls computer power and system state. Usage: boot [-r|-t|-h]'];
+                            if (targetCmd === 'sys') return ['sys - Displays system info and OS version variable. Usage: sys [-v|-h]'];
                         } else if (flag === '-f') {
-                            if (targetCmd === 'help') {
-                                return [
-                                    'Flags for `help`:',
-                                    '  -v - Display current OS version',
-                                    '  -f - Display available help flags'
-                                ];
-                            } else if (targetCmd === 'echo') {
-                                return ['Flags for `echo`:', '  (None available)'];
-                            } else if (targetCmd === 'cleans') {
-                                return ['Flags for `cleans`:', '  (None available)'];
-                            }
+                            if (targetCmd === 'help') return ['Flags for `help`:', '  -f - List flags', '  -h - Command help'];
+                            if (targetCmd === 'cleans') return ['Flags for `cleans`:', '  -h - Command help'];
+                            if (targetCmd === 'echo') return ['Flags for `echo`:', '  -h - Command help'];
+                            if (targetCmd === 'time') return ['Flags for `time`:', '  -r - Readable time/date', '  -t - Time only', '  -d - Date only', '  -h - Command help'];
+                            if (targetCmd === 'test') return ['Flags for `test`:', '  -c - Color test', '  -s - System test', '  -r - RAM test', '  -v - VRAM test', '  -h - Command help'];
+                            if (targetCmd === 'boot') return ['Flags for `boot`:', '  -r - Reboot system', '  -t - Reboot and test', '  -h - Command help'];
+                            if (targetCmd === 'sys') return ['Flags for `sys`:', '  -v - Display OS version variable', '  -h - Command help'];
                         } else {
                             return [`[error] Unknown flag \`${flag}\` for \`help \`${targetCmd}\`\`!`];
                         }
@@ -138,7 +150,11 @@
                     return [`[error] The command \`${cmd}\` received invalid arguments!`];
                 }
 
+                // CLEANS
                 if (cmd === 'cleans') {
+                    if (args === '-h') {
+                        return ['cleans - Clears all output from the terminal screen. Flags: -h'];
+                    }
                     if (args) {
                         return [`[error] The command \`${cmd}\` received too many arguments!`];
                     }
@@ -146,7 +162,11 @@
                     return null;
                 }
 
+                // ECHO
                 if (cmd === 'echo') {
+                    if (args === '-h') {
+                        return ['echo - Print text enclosed in backticks or receive piped data. Flags: -h'];
+                    }
                     if (!args) {
                         if (pipedData !== null && pipedData.length > 0) {
                             return pipedData;
@@ -165,6 +185,97 @@
                         return [args.substring(1, closingIndex)];
                     }
                     return [`[error] Syntax error in \`${cmd}\`: String arguments must be enclosed in backticks (\`text\`).`];
+                }
+
+                // TIME
+                if (cmd === 'time') {
+                    if (!args) {
+                        return [`${Math.floor(Date.now() / 1000)}`];
+                    }
+                    if (args === '-r') {
+                        return [`${new Date().toLocaleString()}`];
+                    }
+                    if (args === '-t') {
+                        return [`${new Date().toLocaleTimeString()}`];
+                    }
+                    if (args === '-d') {
+                        return [`${new Date().toLocaleDateString()}`];
+                    }
+                    if (args === '-h') {
+                        return ['time - Outputs current Unix timestamp or formatted date/time. Flags: -r (readable), -t (time only), -d (date only), -h (help)'];
+                    }
+                    return [`[error] Unknown flag \`${args}\` for \`${cmd}\`!`];
+                }
+
+                // TEST
+                if (cmd === 'test') {
+                    if (!args) {
+                        return [
+                            '[test] RUNNING ALL SYSTEM TESTS...',
+                            '[test] COLOR: OK (VGA 16-color pass)',
+                            '[test] SYSTEM: OK (CPU & System Clock pass)',
+                            '[test] RAM: OK (640KB Base / 16MB Ext pass)',
+                            '[test] VRAM: OK (256KB Video Memory pass)',
+                            '[test] ALL TESTS COMPLETED SUCCESSFULLY.'
+                        ];
+                    }
+                    if (args === '-c') {
+                        return ['[test] COLOR: OK (VGA 16-color pass)'];
+                    }
+                    if (args === '-s') {
+                        return ['[test] SYSTEM: OK (CPU & System Clock pass)'];
+                    }
+                    if (args === '-r') {
+                        return ['[test] RAM: OK (640KB Base / 16MB Ext pass)'];
+                    }
+                    if (args === '-v') {
+                        return ['[test] VRAM: OK (256KB Video Memory pass)'];
+                    }
+                    if (args === '-h') {
+                        return ['test - Diagnostic tests for hardware. Flags: -c (color), -s (system), -r (RAM), -v (VRAM), -h (help)'];
+                    }
+                    return [`[error] Unknown flag \`${args}\` for \`${cmd}\`!`];
+                }
+
+                // BOOT
+                if (cmd === 'boot') {
+                    if (!args) {
+                        terminal.innerHTML = '<div>[SYSTEM SHUTDOWN - POWER OFF]</div>';
+                        this.isPoweredOn = false;
+                        return null;
+                    }
+                    if (args === '-r') {
+                        terminal.innerHTML = '<div>Welcome to LandenOS!</div><div>Type `help` for help</div>';
+                        return null;
+                    }
+                    if (args === '-t') {
+                        terminal.innerHTML = '<div>Welcome to LandenOS!</div><div>Type `help` for help</div>';
+                        return this.executeSingle('test');
+                    }
+                    if (args === '-h') {
+                        return ['boot - System power management. Flags: (none) turn off, -r (reboot), -t (reboot and test), -h (help)'];
+                    }
+                    return [`[error] Unknown flag \`${args}\` for \`${cmd}\`!`];
+                }
+
+                // SYS
+                if (cmd === 'sys') {
+                    if (!args) {
+                        return [
+                            '--- LandenOS System Information ---',
+                            `Version     : ${this.version}`,
+                            `System      : ${this.sysInfo}`,
+                            `System Time : ${new Date().toLocaleString()}`,
+                            'State       : RUNNING (OK)'
+                        ];
+                    }
+                    if (args === '-v') {
+                        return [`LandenOS Version: ${this.version}`];
+                    }
+                    if (args === '-h') {
+                        return ['sys - Displays system information or OS version. Flags: -v (version), -h (help)'];
+                    }
+                    return [`[error] Unknown flag \`${args}\` for \`${cmd}\`!`];
                 }
 
                 return [`[error] \`${cmd}\` is not a command! Type \`help\` for a list of commands.`];
@@ -197,7 +308,7 @@
                     if (currentOutput === null) {
                         break;
                     }
-                    if (currentOutput.length > 0 && currentOutput[0].startsWith('[error]')) {
+                    if (currentOutput.length > 0 && typeof currentOutput[0] === 'string' && currentOutput[0].startsWith('[error]')) {
                         break;
                     }
                 }
@@ -206,6 +317,8 @@
             },
 
             execute(input) {
+                if (!this.isPoweredOn) return null;
+
                 // Check for unsupported double-symbol operators outside backticks
                 let checkBacktick = false;
                 for (let i = 0; i < input.length - 1; i++) {
@@ -271,12 +384,14 @@
         window.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
 
         window.addEventListener('click', () => {
-            if (!document.pointerLockElement) {
+            if (!document.pointerLockElement && OS.isPoweredOn) {
                 document.body.requestPointerLock();
             }
         });
 
         window.addEventListener('keydown', (e) => {
+            if (!OS.isPoweredOn) return;
+
             if (document.pointerLockElement === document.body) {
                 if (e.key === 'Escape') {
                     document.exitPointerLock();
@@ -287,14 +402,16 @@
                 e.stopPropagation();
 
                 const activeLine = terminal.lastElementChild;
+                if (!activeLine || !activeLine.classList.contains('line')) return;
+
                 const inputSpan = activeLine.querySelector('.input');
                 const cursor = activeLine.querySelector('.cursor');
 
                 if (e.key === 'Enter') {
-                    cursor.remove();
+                    if (cursor) cursor.remove();
                     
                     const output = OS.execute(buffer);
-                    if (output !== null) {
+                    if (output !== null && OS.isPoweredOn) {
                         output.forEach(text => {
                             const line = document.createElement('div');
                             line.textContent = text;
@@ -302,21 +419,23 @@
                         });
                     }
 
-                    const nextLine = document.createElement('div');
-                    nextLine.className = 'line';
-                    nextLine.innerHTML = '&gt;&gt;&gt; <span class="input"></span><span class="cursor"></span>';
-                    terminal.appendChild(nextLine);
+                    if (OS.isPoweredOn) {
+                        const nextLine = document.createElement('div');
+                        nextLine.className = 'line';
+                        nextLine.innerHTML = '&gt;&gt;&gt; <span class="input"></span><span class="cursor"></span>';
+                        terminal.appendChild(nextLine);
+                    }
 
                     buffer = '';
                     scrollToBottom();
                 } else if (e.key === 'Backspace') {
                     buffer = buffer.slice(0, -1);
-                    inputSpan.textContent = buffer;
+                    if (inputSpan) inputSpan.textContent = buffer;
                     scrollToBottom();
                 } else if (e.key.length === 1) {
                     if (buffer.length < MAX_INPUT) {
                         buffer += e.key;
-                        inputSpan.textContent = buffer;
+                        if (inputSpan) inputSpan.textContent = buffer;
                         scrollToBottom();
                     }
                 }
