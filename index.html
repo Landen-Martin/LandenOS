@@ -56,7 +56,7 @@
 <body>
     <div id="terminal">
         <div>Welcome to LandenOS!</div>
-        <div>Type `\help` for help</div>
+        <div>Type `help` for help</div>
         <div class="line">&gt;&gt;&gt; <span class="input"></span><span class="cursor"></span></div>
     </div>
 
@@ -67,26 +67,58 @@
 
         const OS = {
             version: "1.0.0",
-            commands: {
-                '\\help': () => [
-                    'LandenOS Command List:',
-                    '  \\help   - Display available system commands',
-                    '  \\cleans - Clear terminal screen output'
-                ],
-                '\\cleans': () => {
+            execute(input) {
+                const raw = input.trim();
+                if (!raw) return [];
+
+                const spaceIndex = raw.indexOf(' ');
+                let cmd = raw;
+                let args = '';
+
+                if (spaceIndex !== -1) {
+                    cmd = raw.substring(0, spaceIndex);
+                    args = raw.substring(spaceIndex + 1).trim();
+                }
+
+                if (cmd === 'help') {
+                    if (args) {
+                        return [`[error] The command \`${cmd}\` received too many arguments!`];
+                    }
+                    return [
+                        'LandenOS Command List:',
+                        '  help        - Display available system commands',
+                        '  cleans      - Clear terminal screen output',
+                        '  echo `text` - Print text to screen'
+                    ];
+                }
+
+                if (cmd === 'cleans') {
+                    if (args) {
+                        return [`[error] The command \`${cmd}\` received too many arguments!`];
+                    }
                     terminal.innerHTML = '';
                     return null;
                 }
-            },
-            execute(input) {
-                const cmd = input.trim();
-                if (this.commands[cmd]) {
-                    return this.commands[cmd]();
+
+                if (cmd === 'echo') {
+                    if (!args) {
+                        return [`[error] The command \`${cmd}\` requiters more arguments then you inputed!`];
+                    }
+                    if (args.startsWith('`')) {
+                        const closingIndex = args.indexOf('`', 1);
+                        if (closingIndex === -1) {
+                            return [`[error] Syntax error in \`${cmd}\`: String arguments must be enclosed in backticks (\`text\`).`];
+                        }
+                        const rest = args.substring(closingIndex + 1).trim();
+                        if (rest.length > 0) {
+                            return [`[error] The command \`${cmd}\` received too many arguments!`];
+                        }
+                        return [args.substring(1, closingIndex)];
+                    }
+                    return [`[error] Syntax error in \`${cmd}\`: String arguments must be enclosed in backticks (\`text\`).`];
                 }
-                if (cmd.startsWith('\\')) {
-                    return [`[warng] \`${cmd}\` is not a command! Type \`\\help\` for a list of commands.`];
-                }
-                return [input];
+
+                return [`[error] \`${cmd}\` is not a command! Type \`help\` for a list of commands.`];
             }
         };
 
