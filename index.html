@@ -72,13 +72,26 @@
     <div id="terminal">
         <div>Welcome to LandenOS!</div>
         <div>Type `help` for help</div>
-        <div class="line">&gt;&gt;&gt; <span class="input"></span><span class="cursor"></span></div>
+        <div class="line">&gt;&gt;&gt; [user @ /] $ <span class="input"></span><span class="cursor"></span></div>
     </div>
 
     <script>
         let buffer = '';
         const MAX_INPUT = 76;
         const terminal = document.getElementById('terminal');
+
+        function stripQuotes(str) {
+            if (!str) return '';
+            let s = str.trim();
+            while ((s.startsWith('`') && s.endsWith('`')) ||
+                   (s.startsWith("'") && s.endsWith("'")) ||
+                   (s.startsWith('"') && s.endsWith('"'))) {
+                s = s.slice(1, -1).trim();
+            }
+            if (s.startsWith('`') || s.startsWith("'") || s.startsWith('"')) s = s.slice(1);
+            if (s.endsWith('`') || s.endsWith("'") || s.endsWith('"')) s = s.slice(0, -1);
+            return s.trim();
+        }
 
         function createLineElement(text) {
             const line = document.createElement('div');
@@ -96,10 +109,173 @@
             return line;
         }
 
+        const FS = {
+            STORAGE_KEY: 'landenos_fs',
+
+            init() {
+                if (!localStorage.getItem(this.STORAGE_KEY)) {
+                    const defaultFS = {
+                        '/': { type: 'dir', created: Date.now() },
+                        '/home': { type: 'dir', created: Date.now() },
+                        '/readme.txt': { type: 'file', content: 'Welcome to LandenOS Virtual File System!', created: Date.now() }
+                    };
+                    this.save(defaultFS);
+                }
+            },
+
+            getFS() {
+                try {
+                    return JSON.parse(localStorage.getItem(this.STORAGE_KEY)) || {};
+                } catch (e) {
+                    return {};
+                }
+            },
+
+            save(fsData) {
+                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(fsData));
+            },
+
+            normalizePath(path, cwd) {
+                if (!path) return cwd;
+                let rawPath = stripQuotes(path);
+                if (!rawPath) return cwd;
+
+                let absolutePath;
+                if (rawPath.startsWith('/')) {
+                    absolutePath = rawPath;
+                } else {
+                    absolutePath = (cwd === '/' ? '' : cwd) + '/' + rawPath;
+                }
+
+                const parts = absolutePath.split('/').filter(Boolean);
+                const stack = [];
+
+                for (const part of parts) {
+                    if (part === '.') {
+                        continue;
+                    } else if (part === '..') {
+                        if (stack.length > 0) stack.pop();
+                    } else {
+                        stack.push(part);
+                    }
+                }
+
+                const finalPath = '/' + stack.join('/');
+                const fs = this.getFS();
+
+                if (!fs[finalPath] && stack.length > 0) {
+                    const rootCandidate = '/' + stack[stack.length - 1];
+                    if (fs[rootCandidate]) return rootCandidate;
+                }
+
+                return finalPath;
+            },
+
+            getParentPath(path) {
+                if (path === '/') return '/';
+                const parts = path.split('/').filter(Boolean);
+                parts.pop();
+                return '/' + parts.join('/');
+            },
+
+            getNode(path) {
+                const fs = this.getFS();
+                return fs[path] || null;
+            },
+
+            exists(path) {
+                return !!this.getNode(path);
+            },
+
+            createFile(path, content = '') {
+                const fs = this.getFS();
+                const parent = this.getParentPath(path);
+                if (parent !== '/' && (!fs[parent] || fs[parent].type !== 'dir')) {
+                    return false;
+                }
+                fs[path] = {
+                    type: 'file',
+                    content: content,
+                    created: Date.now()
+                };
+                this.save(fs);
+                return true;
+            },
+
+            createDir(path) {
+                const fs = this.getFS();
+                const parent = this.getParentPath(path);
+                if (parent !== '/' && (!fs[parent] || fs[parent].type !== 'dir')) {
+                    return false;
+                }
+                fs[path] = {
+                    type: 'dir',
+                    created: Date.now()
+                };
+                this.save(fs);
+                return true;
+            },
+
+            remove(path) {
+                const fs = this.getFS();
+                if (!fs[path]) return false;
+
+                if (fs[path].type === 'dir') {
+                    const prefix = path === '/' ? '/' : path + '/';
+                    for (const key in fs) {
+                        if (key !== path && key.startsWith(prefix)) {
+                            delete fs[key];
+                        }
+                    }
+                }
+                delete fs[path];
+                this.save(fs);
+                return true;
+            },
+
+            writeFile(path, content) {
+                const fs = this.getFS();
+                if (!fs[path] || fs[path].type !== 'file') return false;
+                fs[path].content = content;
+                fs[path].modified = Date.now();
+                this.save(fs);
+                return true;
+            }
+        };
+
+        FS.init();
+
+        function extractBackticks(str) {
+            const result = [];
+            let current = '';
+            let inBacktick = false;
+
+            for (let i = 0; i < str.length; i++) {
+                const char = str[i];
+                if (char === '`') {
+                    if (inBacktick) {
+                        result.push(current);
+                        current = '';
+                        inBacktick = false;
+                    } else {
+                        inBacktick = true;
+                    }
+                } else if (inBacktick) {
+                    current += char;
+                }
+            }
+            return result;
+        }
+
         const OS = {
-            version: "alpha v1.0.2",
-            sysInfo: "LandenOS v1.0.0 | x86_64 Virtual Engine | 640KB Base RAM / 16MB Total | VGA Display 80x25",
+            version: "alpha v1.0.2.1790779299",
+            sysInfo: "x86_64 Virtual Engine | 640KB Base RAM / 16MB Total | VGA Display 80x25",
             isPoweredOn: true,
+            cwd: "/",
+
+            getPrompt() {
+                return `>>> [user @ ${this.cwd}] $ `;
+            },
 
             executeSingle(input, pipedData = null) {
                 if (!this.isPoweredOn) return null;
@@ -126,7 +302,12 @@
                             '  time        - Display Unix timestamp or formatted date/time',
                             '  test        - Run system diagnostic tests',
                             '  boot        - Control system power and reboot state',
-                            '  sys         - Display full system information or version'
+                            '  sys         - Display full system information or version',
+                            '  list        - List current directory contents',
+                            '  file        - Inspect, create, or remove files',
+                            '  dir         - Inspect, create, or remove directories',
+                            '  iwf         - In/Write file contents',
+                            '  cd          - Change current working directory'
                         ];
                     }
                     if (args === '-h') {
@@ -142,15 +323,11 @@
                     if (args === '-v') {
                         return ['[warng] Flag `-v` moved to `sys -v`! Use `sys -v` for version.'];
                     }
-                    if (args.startsWith('`')) {
-                        const closingIndex = args.indexOf('`', 1);
-                        if (closingIndex === -1) {
-                            return [`[error] Syntax error in \`${cmd}\`: Target command must be enclosed in backticks (\`cmd\`).`];
-                        }
-                        const targetCmd = args.substring(1, closingIndex).trim();
-                        const flag = args.substring(closingIndex + 1).trim();
+                    if (args.startsWith('`') || args.startsWith("'") || args.startsWith('"')) {
+                        const targetCmd = stripQuotes(args.split(' ')[0]);
+                        const flag = stripQuotes(args.substring(args.indexOf(' ') + 1));
 
-                        const validCommands = ['help', 'cleans', 'echo', 'time', 'test', 'boot', 'sys'];
+                        const validCommands = ['help', 'cleans', 'echo', 'time', 'test', 'boot', 'sys', 'list', 'file', 'dir', 'iwf', 'cd'];
                         if (!validCommands.includes(targetCmd)) {
                             return [`[error] \`${targetCmd}\` is not a command!`];
                         }
@@ -163,6 +340,11 @@
                             if (targetCmd === 'test') return ['test - Diagnostics runner for system hardware. Usage: test [-c|-s|-r|-v|-h]'];
                             if (targetCmd === 'boot') return ['boot - Controls computer power and system state. Usage: boot [-r|-t|-h]'];
                             if (targetCmd === 'sys') return ['sys - Displays system info and OS version variable. Usage: sys [-v|-h]'];
+                            if (targetCmd === 'list') return ['list - Lists current working directory. Usage: list [-r|-i|-t|-h]'];
+                            if (targetCmd === 'file') return ['file - Inspect or manage files. Usage: file `path` [-f|-e|-r|-c|-h]'];
+                            if (targetCmd === 'dir') return ['dir - Inspect or manage directories. Usage: dir `path` [-r|-c|-h]'];
+                            if (targetCmd === 'iwf') return ['iwf - Read, write, or clear file contents. Usage: iwf [-r|-w|-c|-h] `path` [`content`]'];
+                            if (targetCmd === 'cd') return ['cd - Changes directory or goes back with `cd .`. Usage: cd `path` | cd . [-h]'];
                         } else if (flag === '-f') {
                             if (targetCmd === 'help') return ['Flags for `help`:', '  -f - List flags', '  -h - Command help'];
                             if (targetCmd === 'cleans') return ['Flags for `cleans`:', '  -h - Command help'];
@@ -171,6 +353,11 @@
                             if (targetCmd === 'test') return ['Flags for `test`:', '  -c - Color test', '  -s - System test', '  -r - RAM test', '  -v - VRAM test', '  -h - Command help'];
                             if (targetCmd === 'boot') return ['Flags for `boot`:', '  -r - Reboot system', '  -t - Reboot and test', '  -h - Command help'];
                             if (targetCmd === 'sys') return ['Flags for `sys`:', '  -v - Display OS version variable', '  -h - Command help'];
+                            if (targetCmd === 'list') return ['Flags for `list`:', '  -r - Readable format', '  -i - Info (filesize)', '  -t - File tree view', '  -h - Command help'];
+                            if (targetCmd === 'file') return ['Flags for `file`:', '  -f - Create or toggle remove', '  -e - Check existence', '  -r - Remove file', '  -c - Create file', '  -h - Command help'];
+                            if (targetCmd === 'dir') return ['Flags for `dir`:', '  -r - Remove directory', '  -c - Create directory', '  -h - Command help'];
+                            if (targetCmd === 'iwf') return ['Flags for `iwf`:', '  -r - Read contents', '  -w - Write content', '  -c - Clear content', '  -h - Command help'];
+                            if (targetCmd === 'cd') return ['Flags for `cd`:', '  -h - Command help'];
                         } else {
                             return [`[error] Unknown flag \`${flag}\` for \`help \`${targetCmd}\`\`!`];
                         }
@@ -204,18 +391,7 @@
                         }
                         return [`[error] The command \`${cmd}\` requiters more arguments then you inputed!`];
                     }
-                    if (args.startsWith('`')) {
-                        const closingIndex = args.indexOf('`', 1);
-                        if (closingIndex === -1) {
-                            return [`[error] Syntax error in \`${cmd}\`: String arguments must be enclosed in backticks (\`text\`).`];
-                        }
-                        const rest = args.substring(closingIndex + 1).trim();
-                        if (rest.length > 0) {
-                            return [`[error] The command \`${cmd}\` received too many arguments!`];
-                        }
-                        return [args.substring(1, closingIndex)];
-                    }
-                    return [`[error] Syntax error in \`${cmd}\`: String arguments must be enclosed in backticks (\`text\`).`];
+                    return [stripQuotes(args)];
                 }
 
                 // TIME
@@ -310,6 +486,331 @@
                     return [`[error] Unknown flag \`${args}\` for \`${cmd}\`!`];
                 }
 
+                // LIST
+                if (cmd === 'list') {
+                    if (args === '-h') {
+                        return ['list - Lists items in the current working directory. Flags: -r (human readable), -i (info & filesize), -t (tree view), -h (help)'];
+                    }
+
+                    const fs = FS.getFS();
+                    const cwdPath = this.cwd;
+                    const children = [];
+
+                    for (const path in fs) {
+                        if (path === '/') continue;
+                        const parent = FS.getParentPath(path);
+                        if (parent === cwdPath) {
+                            const name = path.substring(path.lastIndexOf('/') + 1);
+                            children.push({ name, path, ...fs[path] });
+                        }
+                    }
+
+                    if (!args) {
+                        if (children.length === 0) return ['[noats] Directory is empty.'];
+                        return children.map(c => c.type === 'dir' ? `[DIR]  ${c.name}/` : `[FILE] ${c.name}`);
+                    }
+
+                    if (args === '-r') {
+                        if (children.length === 0) return ['[noats] Directory is empty.'];
+                        return children.map(c => {
+                            const dateStr = new Date(c.created || Date.now()).toLocaleString();
+                            const typeStr = c.type === 'dir' ? '<DIR> ' : '<FILE>';
+                            return `${typeStr}  ${c.name.padEnd(20)}  Created: ${dateStr}`;
+                        });
+                    }
+
+                    if (args === '-i') {
+                        if (children.length === 0) return ['[noats] Directory is empty.'];
+                        return children.map(c => {
+                            const size = c.type === 'file' ? (c.content ? c.content.length : 0) + ' bytes' : 'N/A';
+                            const typeStr = c.type.toUpperCase();
+                            return `Type: ${typeStr.padEnd(5)} | Size: ${size.padEnd(10)} | Name: ${c.name}`;
+                        });
+                    }
+
+                    if (args === '-t') {
+                        const lines = [`Tree location: ${cwdPath}`];
+                        const buildTree = (basePath, prefix) => {
+                            const items = [];
+                            for (const path in fs) {
+                                if (path === '/') continue;
+                                if (FS.getParentPath(path) === basePath) {
+                                    items.push({ name: path.substring(path.lastIndexOf('/') + 1), path, ...fs[path] });
+                                }
+                            }
+                            items.forEach((item, idx) => {
+                                const isLast = idx === items.length - 1;
+                                const connector = isLast ? '└── ' : '├── ';
+                                const suffix = item.type === 'dir' ? '/' : '';
+                                lines.push(`${prefix}${connector}${item.name}${suffix}`);
+                                if (item.type === 'dir') {
+                                    buildTree(item.path, prefix + (isLast ? '    ' : '│   '));
+                                }
+                            });
+                        };
+                        buildTree(cwdPath, '');
+                        if (lines.length === 1) lines.push('└── (empty)');
+                        return lines;
+                    }
+
+                    return [`[error] Unknown flag \`${args}\` for \`list\`!`];
+                }
+
+                // FILE
+                if (cmd === 'file') {
+                    if (args === '-h') {
+                        return ['file - Manage or inspect files. Flags: -f (create/toggle), -e (check exists), -r (remove), -c (create), -h (help)'];
+                    }
+
+                    let flag = '';
+                    let pathArg = args;
+
+                    if (args.startsWith('-')) {
+                        const spaceIdx = args.indexOf(' ');
+                        if (spaceIdx !== -1) {
+                            flag = args.substring(0, spaceIdx).trim();
+                            pathArg = args.substring(spaceIdx + 1).trim();
+                        } else {
+                            flag = args.trim();
+                            pathArg = '';
+                        }
+                    }
+
+                    pathArg = stripQuotes(pathArg);
+
+                    if (!pathArg && flag !== '-h') {
+                        return [`[error] Command \`file\` requires a file path argument!`];
+                    }
+
+                    const fullPath = FS.normalizePath(pathArg, this.cwd);
+
+                    if (!flag) {
+                        const node = FS.getNode(fullPath);
+                        if (!node) return [`[error] File \`${fullPath}\` does not exist!`];
+                        if (node.type !== 'file') return [`[error] Path \`${fullPath}\` is a directory, not a file!`];
+                        
+                        const filename = fullPath.substring(fullPath.lastIndexOf('/') + 1);
+                        const size = node.content ? node.content.length : 0;
+                        const createdStr = new Date(node.created || Date.now()).toLocaleString();
+                        return [
+                            `================ FILE HEADER ===============`,
+                            `Name      : ${filename}`,
+                            `Path      : ${fullPath}`,
+                            `Type      : FILE`,
+                            `Size      : ${size} bytes`,
+                            `Created   : ${createdStr}`,
+                            `============================================`
+                        ];
+                    }
+
+                    if (flag === '-f') {
+                        if (FS.exists(fullPath)) {
+                            FS.remove(fullPath);
+                            return [`[noats] File \`${fullPath}\` existed and was removed.`];
+                        } else {
+                            const ok = FS.createFile(fullPath);
+                            if (!ok) return [`[error] Cannot create file \`${fullPath}\`. Parent directory missing.`];
+                            return [`[noats] File \`${fullPath}\` created.`];
+                        }
+                    }
+
+                    if (flag === '-e') {
+                        const exists = FS.exists(fullPath) && FS.getNode(fullPath).type === 'file';
+                        return [`[noats] File \`${fullPath}\` exists: ${exists}`];
+                    }
+
+                    if (flag === '-r') {
+                        if (!FS.exists(fullPath)) return [`[error] File \`${fullPath}\` does not exist!`];
+                        FS.remove(fullPath);
+                        return [`[noats] File \`${fullPath}\` successfully removed.`];
+                    }
+
+                    if (flag === '-c') {
+                        if (FS.exists(fullPath)) return [`[warng] File \`${fullPath}\` already exists!`];
+                        const ok = FS.createFile(fullPath);
+                        if (!ok) return [`[error] Cannot create file \`${fullPath}\`. Parent directory missing.`];
+                        return [`[noats] File \`${fullPath}\` created successfully.`];
+                    }
+
+                    return [`[error] Unknown flag \`${flag}\` for \`file\`!`];
+                }
+
+                // DIR
+                if (cmd === 'dir') {
+                    if (args === '-h') {
+                        return ['dir - Manage or inspect directories. Flags: -r (remove), -c (create), -h (help)'];
+                    }
+
+                    let flag = '';
+                    let pathArg = args;
+
+                    if (args.startsWith('-')) {
+                        const spaceIdx = args.indexOf(' ');
+                        if (spaceIdx !== -1) {
+                            flag = args.substring(0, spaceIdx).trim();
+                            pathArg = args.substring(spaceIdx + 1).trim();
+                        } else {
+                            flag = args.trim();
+                            pathArg = '';
+                        }
+                    }
+
+                    pathArg = stripQuotes(pathArg);
+
+                    if (!pathArg) {
+                        return [`[error] Command \`dir\` requires a directory path argument!`];
+                    }
+
+                    const fullPath = FS.normalizePath(pathArg, this.cwd);
+
+                    if (!flag) {
+                        const node = FS.getNode(fullPath);
+                        if (!node) return [`[error] Directory \`${fullPath}\` does not exist!`];
+                        if (node.type !== 'dir') return [`[error] Path \`${fullPath}\` is a file, not a directory!`];
+
+                        const fs = FS.getFS();
+                        let itemCount = 0;
+                        for (const key in fs) {
+                            if (key !== fullPath && FS.getParentPath(key) === fullPath) {
+                                itemCount++;
+                            }
+                        }
+                        const dirname = fullPath === '/' ? '/' : fullPath.substring(fullPath.lastIndexOf('/') + 1);
+                        const createdStr = new Date(node.created || Date.now()).toLocaleString();
+
+                        return [
+                            `================ DIR HEADER ===============`,
+                            `Name      : ${dirname}`,
+                            `Path      : ${fullPath}`,
+                            `Type      : DIRECTORY`,
+                            `Items     : ${itemCount}`,
+                            `Created   : ${createdStr}`,
+                            `===========================================`
+                        ];
+                    }
+
+                    if (flag === '-c') {
+                        if (FS.exists(fullPath)) return [`[warng] Directory \`${fullPath}\` already exists!`];
+                        const ok = FS.createDir(fullPath);
+                        if (!ok) return [`[error] Cannot create directory \`${fullPath}\`. Parent directory missing.`];
+                        return [`[noats] Directory \`${fullPath}\` created successfully.`];
+                    }
+
+                    if (flag === '-r') {
+                        if (fullPath === '/') return [`[error] Cannot remove root directory \`/\`!`];
+                        if (!FS.exists(fullPath)) return [`[error] Directory \`${fullPath}\` does not exist!`];
+                        FS.remove(fullPath);
+                        if (this.cwd.startsWith(fullPath)) {
+                            this.cwd = FS.getParentPath(fullPath);
+                        }
+                        return [`[noats] Directory \`${fullPath}\` removed successfully.`];
+                    }
+
+                    return [`[error] Unknown flag \`${flag}\` for \`dir\`!`];
+                }
+
+                // IWF
+                if (cmd === 'iwf') {
+                    if (args === '-h' || !args) {
+                        return ['iwf - In/Write File utility. Flags: -r `path` (read), -w `path` `content` (write), -c `path` (clear), -h (help)'];
+                    }
+
+                    let flag = '';
+                    let restArgs = args;
+
+                    if (args.startsWith('-')) {
+                        const spaceIdx = args.indexOf(' ');
+                        if (spaceIdx !== -1) {
+                            flag = args.substring(0, spaceIdx).trim();
+                            restArgs = args.substring(spaceIdx + 1).trim();
+                        } else {
+                            flag = args.trim();
+                            restArgs = '';
+                        }
+                    }
+
+                    if (flag === '-r') {
+                        const pathStr = stripQuotes(restArgs);
+                        if (!pathStr) return [`[error] Command \`iwf -r\` requires a file path!`];
+                        const fullPath = FS.normalizePath(pathStr, this.cwd);
+                        const node = FS.getNode(fullPath);
+                        if (!node) return [`[error] File \`${fullPath}\` does not exist!`];
+                        if (node.type !== 'file') return [`[error] \`${fullPath}\` is a directory!`];
+                        return node.content ? [node.content] : ['[noats] (file is empty)'];
+                    }
+
+                    if (flag === '-w') {
+                        const ticks = extractBackticks(restArgs);
+                        let pathStr = '';
+                        let contentStr = '';
+
+                        if (ticks.length >= 1) {
+                            pathStr = ticks[0];
+                            contentStr = ticks.length > 1 ? ticks[1] : (pipedData !== null ? pipedData.join('\n') : '');
+                        } else {
+                            const parts = restArgs.split(' ');
+                            pathStr = stripQuotes(parts[0]);
+                            contentStr = parts.slice(1).join(' ');
+                            if (pipedData !== null && !contentStr) {
+                                contentStr = pipedData.join('\n');
+                            }
+                        }
+
+                        if (!pathStr) return [`[error] Command \`iwf -w\` requires a file path!`];
+                        pathStr = stripQuotes(pathStr);
+
+                        const fullPath = FS.normalizePath(pathStr, this.cwd);
+                        if (!FS.exists(fullPath)) {
+                            FS.createFile(fullPath, contentStr);
+                        } else {
+                            FS.writeFile(fullPath, contentStr);
+                        }
+                        return [`[noats] Successfully wrote to \`${fullPath}\`.`];
+                    }
+
+                    if (flag === '-c') {
+                        const pathStr = stripQuotes(restArgs);
+                        if (!pathStr) return [`[error] Command \`iwf -c\` requires a file path!`];
+                        const fullPath = FS.normalizePath(pathStr, this.cwd);
+                        if (!FS.exists(fullPath)) return [`[error] File \`${fullPath}\` does not exist!`];
+                        FS.writeFile(fullPath, '');
+                        return [`[noats] Cleared content of \`${fullPath}\`.`];
+                    }
+
+                    return [`[error] Unknown flag \`${flag}\` for \`iwf\`!`];
+                }
+
+                // CD
+                if (cmd === 'cd') {
+                    if (args === '-h') {
+                        return ['cd - Change directory. Usage: cd `path` or cd . (goes back up). Flags: -h'];
+                    }
+                    if (!args) {
+                        this.cwd = '/';
+                        return [];
+                    }
+
+                    let targetPath = stripQuotes(args);
+
+                    if (targetPath === '.') {
+                        this.cwd = FS.getParentPath(this.cwd);
+                        return [];
+                    }
+
+                    const fullPath = FS.normalizePath(targetPath, this.cwd);
+                    const node = FS.getNode(fullPath);
+
+                    if (!node) {
+                        return [`[error] Directory \`${fullPath}\` does not exist!`];
+                    }
+                    if (node.type !== 'dir') {
+                        return [`[error] \`${fullPath}\` is not a directory!`];
+                    }
+
+                    this.cwd = fullPath;
+                    return [];
+                }
+
                 return [`[error] \`${cmd}\` is not a command! Type \`help\` for a list of commands.`];
             },
 
@@ -351,7 +852,6 @@
             execute(input) {
                 if (!this.isPoweredOn) return null;
 
-                // Check for unsupported double-symbol operators outside backticks
                 let checkBacktick = false;
                 for (let i = 0; i < input.length - 1; i++) {
                     const char = input[i];
@@ -453,7 +953,7 @@
                     if (OS.isPoweredOn) {
                         const nextLine = document.createElement('div');
                         nextLine.className = 'line';
-                        nextLine.innerHTML = '&gt;&gt;&gt; <span class="input"></span><span class="cursor"></span>';
+                        nextLine.innerHTML = `&gt;&gt;&gt; [user @ ${OS.cwd}] $ <span class="input"></span><span class="cursor"></span>`;
                         terminal.appendChild(nextLine);
                     }
 
