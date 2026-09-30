@@ -39,6 +39,21 @@
             word-break: break-all;
         }
 
+        .tag-noats {
+            color: #5599ff;
+            font-weight: bold;
+        }
+
+        .tag-warng {
+            color: #ffff55;
+            font-weight: bold;
+        }
+
+        .tag-error {
+            color: #ff5555;
+            font-weight: bold;
+        }
+
         .cursor {
             display: inline-block;
             width: 0.5em;
@@ -65,8 +80,24 @@
         const MAX_INPUT = 76;
         const terminal = document.getElementById('terminal');
 
+        function createLineElement(text) {
+            const line = document.createElement('div');
+            let escaped = text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+
+            escaped = escaped
+                .replace(/\[noats\]/g, '<span class="tag-noats">[noats]</span>')
+                .replace(/\[warng\]/g, '<span class="tag-warng">[warng]</span>')
+                .replace(/\[error\]/g, '<span class="tag-error">[error]</span>');
+
+            line.innerHTML = escaped;
+            return line;
+        }
+
         const OS = {
-            version: "alpha v1.0.1.1790777229",
+            version: "alpha v1.0.2",
             sysInfo: "LandenOS v1.0.0 | x86_64 Virtual Engine | 640KB Base RAM / 16MB Total | VGA Display 80x25",
             isPoweredOn: true,
 
@@ -109,7 +140,7 @@
                         ];
                     }
                     if (args === '-v') {
-                        return ['[error] Flag `-v` moved to `sys -v`! Use `sys -v` for version.'];
+                        return ['[warng] Flag `-v` moved to `sys -v`! Use `sys -v` for version.'];
                     }
                     if (args.startsWith('`')) {
                         const closingIndex = args.indexOf('`', 1);
@@ -211,12 +242,12 @@
                 if (cmd === 'test') {
                     if (!args) {
                         return [
-                            '[test] RUNNING ALL SYSTEM TESTS...',
+                            '[noats] RUNNING ALL SYSTEM TESTS...',
                             '[test] COLOR: OK (VGA 16-color pass)',
                             '[test] SYSTEM: OK (CPU & System Clock pass)',
                             '[test] RAM: OK (640KB Base / 16MB Ext pass)',
                             '[test] VRAM: OK (256KB Video Memory pass)',
-                            '[test] ALL TESTS COMPLETED SUCCESSFULLY.'
+                            '[noats] ALL TESTS COMPLETED SUCCESSFULLY.'
                         ];
                     }
                     if (args === '-c') {
@@ -240,7 +271,8 @@
                 // BOOT
                 if (cmd === 'boot') {
                     if (!args) {
-                        terminal.innerHTML = '<div>[SYSTEM SHUTDOWN - POWER OFF]</div>';
+                        terminal.innerHTML = '';
+                        terminal.appendChild(createLineElement('[noats] [SYSTEM SHUTDOWN - POWER OFF]'));
                         this.isPoweredOn = false;
                         return null;
                     }
@@ -413,8 +445,7 @@
                     const output = OS.execute(buffer);
                     if (output !== null && OS.isPoweredOn) {
                         output.forEach(text => {
-                            const line = document.createElement('div');
-                            line.textContent = text;
+                            const line = createLineElement(text);
                             terminal.appendChild(line);
                         });
                     }
