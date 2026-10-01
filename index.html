@@ -93,6 +93,11 @@
             return s.trim();
         }
 
+        function matchWildcard(str, pattern) {
+            const regexPattern = '^' + pattern.replace(/\./g, '\\.').replace(/\*/g, '.*').replace(/\?/g, '.') + '$';
+            return new RegExp(regexPattern).test(str);
+        }
+
         function createLineElement(text) {
             const line = document.createElement('div');
             let escaped = text
@@ -267,11 +272,20 @@
             return result;
         }
 
+        function extractPathArgs(argsStr) {
+            const ticks = extractBackticks(argsStr);
+            if (ticks.length > 0) {
+                return ticks.map(t => stripQuotes(t));
+            }
+            return argsStr.trim().split(/\s+/).map(s => stripQuotes(s)).filter(Boolean);
+        }
+
         const OS = {
-            version: "alpha v1.0.2.1790779299",
+            version: "alpha v1.0.2.1790873943",
             sysInfo: "x86_64 Virtual Engine | 640KB Base RAM / 16MB Total | VGA Display 80x25",
             isPoweredOn: true,
             cwd: "/",
+            clipboard: null,
 
             getPrompt() {
                 return `>>> [user @ ${this.cwd}] $ `;
@@ -307,6 +321,7 @@
                             '  file        - Inspect, create, or remove files',
                             '  dir         - Inspect, create, or remove directories',
                             '  iwf         - In/Write file contents',
+                            '  mv          - Move, copy, paste, or duplicate files',
                             '  cd          - Change current working directory'
                         ];
                     }
@@ -327,7 +342,7 @@
                         const targetCmd = stripQuotes(args.split(' ')[0]);
                         const flag = stripQuotes(args.substring(args.indexOf(' ') + 1));
 
-                        const validCommands = ['help', 'cleans', 'echo', 'time', 'test', 'boot', 'sys', 'list', 'file', 'dir', 'iwf', 'cd'];
+                        const validCommands = ['help', 'cleans', 'echo', 'time', 'test', 'boot', 'sys', 'list', 'file', 'dir', 'iwf', 'mv', 'cd'];
                         if (!validCommands.includes(targetCmd)) {
                             return [`[error] \`${targetCmd}\` is not a command!`];
                         }
@@ -344,6 +359,7 @@
                             if (targetCmd === 'file') return ['file - Inspect or manage files. Usage: file `path` [-f|-e|-r|-c|-h]'];
                             if (targetCmd === 'dir') return ['dir - Inspect or manage directories. Usage: dir `path` [-r|-c|-h]'];
                             if (targetCmd === 'iwf') return ['iwf - Read, write, or clear file contents. Usage: iwf [-r|-w|-c|-h] `path` [`content`]'];
+                            if (targetCmd === 'mv') return ['mv - Move, copy, paste, or duplicate files. Usage: mv `src` `dest` | mv -c `path` | mv -p `path` | mv -d `src` `dest`'];
                             if (targetCmd === 'cd') return ['cd - Changes directory or goes back with `cd .`. Usage: cd `path` | cd . [-h]'];
                         } else if (flag === '-f') {
                             if (targetCmd === 'help') return ['Flags for `help`:', '  -f - List flags', '  -h - Command help'];
@@ -354,9 +370,10 @@
                             if (targetCmd === 'boot') return ['Flags for `boot`:', '  -r - Reboot system', '  -t - Reboot and test', '  -h - Command help'];
                             if (targetCmd === 'sys') return ['Flags for `sys`:', '  -v - Display OS version variable', '  -h - Command help'];
                             if (targetCmd === 'list') return ['Flags for `list`:', '  -r - Readable format', '  -i - Info (filesize)', '  -t - File tree view', '  -h - Command help'];
-                            if (targetCmd === 'file') return ['Flags for `file`:', '  -f - Create or toggle remove', '  -e - Check existence', '  -r - Remove file', '  -c - Create file', '  -h - Command help'];
+                            if (targetCmd === 'file') return ['Flags for `file`:', '  -f - Create or toggle remove', '  -e - Check existence', '  -r - Remove file (supports wildcards e.g. *.txt)', '  -c - Create file', '  -h - Command help'];
                             if (targetCmd === 'dir') return ['Flags for `dir`:', '  -r - Remove directory', '  -c - Create directory', '  -h - Command help'];
                             if (targetCmd === 'iwf') return ['Flags for `iwf`:', '  -r - Read contents', '  -w - Write content', '  -c - Clear content', '  -h - Command help'];
+                            if (targetCmd === 'mv') return ['Flags for `mv`:', '  -c - Copy file to clipboard', '  -p - Paste file from clipboard', '  -d - Duplicate file to path', '  -h - Command help'];
                             if (targetCmd === 'cd') return ['Flags for `cd`:', '  -h - Command help'];
                         } else {
                             return [`[error] Unknown flag \`${flag}\` for \`help \`${targetCmd}\`\`!`];
@@ -559,7 +576,7 @@
                 // FILE
                 if (cmd === 'file') {
                     if (args === '-h') {
-                        return ['file - Manage or inspect files. Flags: -f (create/toggle), -e (check exists), -r (remove), -c (create), -h (help)'];
+                        return ['file - Manage or inspect files. Flags: -f (create/toggle), -e (check exists), -r (remove file/pattern), -c (create), -h (help)'];
                     }
 
                     let flag = '';
@@ -580,6 +597,37 @@
 
                     if (!pathArg && flag !== '-h') {
                         return [`[error] Command \`file\` requires a file path argument!`];
+                    }
+
+                    // Wildcard handling for file removal (e.g. file -r `*.txt`)
+                    if (flag === '-r' && pathArg.includes('*')) {
+                        let targetDir = this.cwd;
+                        let pattern = pathArg;
+
+                        const lastSlash = pathArg.lastIndexOf('/');
+                        if (lastSlash !== -1) {
+                            const dirPart = pathArg.substring(0, lastSlash);
+                            pattern = pathArg.substring(lastSlash + 1);
+                            targetDir = FS.normalizePath(dirPart, this.cwd);
+                        }
+
+                        const fs = FS.getFS();
+                        const removedFiles = [];
+
+                        for (const path in fs) {
+                            if (fs[path].type === 'file' && FS.getParentPath(path) === targetDir) {
+                                const fileName = path.substring(path.lastIndexOf('/') + 1);
+                                if (matchWildcard(fileName, pattern)) {
+                                    FS.remove(path);
+                                    removedFiles.push(path);
+                                }
+                            }
+                        }
+
+                        if (removedFiles.length === 0) {
+                            return [`[warng] No files matched pattern \`${pathArg}\`!`];
+                        }
+                        return [`[noats] Removed ${removedFiles.length} file(s) matching \`${pathArg}\`.`];
                     }
 
                     const fullPath = FS.normalizePath(pathArg, this.cwd);
@@ -778,6 +826,113 @@
                     }
 
                     return [`[error] Unknown flag \`${flag}\` for \`iwf\`!`];
+                }
+
+                // MV
+                if (cmd === 'mv') {
+                    if (args === '-h' || !args) {
+                        return ['mv - Move, copy, paste, or duplicate files. Usage: mv `src` `dest` | mv -c `path` | mv -p `path` | mv -d `src` `dest`'];
+                    }
+
+                    let flag = '';
+                    let restArgs = args;
+
+                    if (args.startsWith('-')) {
+                        const spaceIdx = args.indexOf(' ');
+                        if (spaceIdx !== -1) {
+                            flag = args.substring(0, spaceIdx).trim();
+                            restArgs = args.substring(spaceIdx + 1).trim();
+                        } else {
+                            flag = args.trim();
+                            restArgs = '';
+                        }
+                    }
+
+                    const pathArgs = extractPathArgs(restArgs);
+
+                    // Copy file to clipboard: mv -c `path/test.txt`
+                    if (flag === '-c') {
+                        const srcPath = pathArgs[0];
+                        if (!srcPath) return [`[error] Command \`mv -c\` requires a source file path!`];
+                        
+                        const fullSrc = FS.normalizePath(srcPath, this.cwd);
+                        const node = FS.getNode(fullSrc);
+                        if (!node) return [`[error] File \`${fullSrc}\` does not exist!`];
+                        if (node.type !== 'file') return [`[error] \`${fullSrc}\` is a directory, not a file!`];
+
+                        const fileName = fullSrc.substring(fullSrc.lastIndexOf('/') + 1);
+                        this.clipboard = {
+                            name: fileName,
+                            content: node.content || ''
+                        };
+
+                        return [`[noats] Copied \`${fullSrc}\` to clipboard.`];
+                    }
+
+                    // Paste file from clipboard: mv -p `test.txt`
+                    if (flag === '-p') {
+                        if (!this.clipboard) {
+                            return [`[error] Clipboard is empty! Use \`mv -c\` first.`];
+                        }
+                        const destPath = pathArgs[0] || this.clipboard.name;
+                        const fullDest = FS.normalizePath(destPath, this.cwd);
+
+                        if (!FS.exists(fullDest)) {
+                            const created = FS.createFile(fullDest, this.clipboard.content);
+                            if (!created) return [`[error] Cannot paste to \`${fullDest}\`. Directory missing.`];
+                        } else {
+                            FS.writeFile(fullDest, this.clipboard.content);
+                        }
+
+                        return [`[noats] Pasted file contents to \`${fullDest}\`.`];
+                    }
+
+                    // Duplicate file: mv -d `path/test.txt` `test.txt`
+                    if (flag === '-d') {
+                        if (pathArgs.length < 2) {
+                            return [`[error] Command \`mv -d\` requires both source and destination paths!`];
+                        }
+                        const fullSrc = FS.normalizePath(pathArgs[0], this.cwd);
+                        const fullDest = FS.normalizePath(pathArgs[1], this.cwd);
+
+                        const node = FS.getNode(fullSrc);
+                        if (!node) return [`[error] Source file \`${fullSrc}\` does not exist!`];
+                        if (node.type !== 'file') return [`[error] \`${fullSrc}\` is a directory!`];
+
+                        if (!FS.exists(fullDest)) {
+                            const created = FS.createFile(fullDest, node.content || '');
+                            if (!created) return [`[error] Cannot duplicate to \`${fullDest}\`. Directory missing.`];
+                        } else {
+                            FS.writeFile(fullDest, node.content || '');
+                        }
+
+                        return [`[noats] Duplicated \`${fullSrc}\` to \`${fullDest}\`.`];
+                    }
+
+                    // Standard Move: mv `path/test.txt` `test.txt`
+                    if (!flag) {
+                        if (pathArgs.length < 2) {
+                            return [`[error] Command \`mv\` requires both source and destination paths!`];
+                        }
+                        const fullSrc = FS.normalizePath(pathArgs[0], this.cwd);
+                        const fullDest = FS.normalizePath(pathArgs[1], this.cwd);
+
+                        const node = FS.getNode(fullSrc);
+                        if (!node) return [`[error] File \`${fullSrc}\` does not exist!`];
+                        if (node.type !== 'file') return [`[error] \`${fullSrc}\` is a directory!`];
+
+                        if (!FS.exists(fullDest)) {
+                            const created = FS.createFile(fullDest, node.content || '');
+                            if (!created) return [`[error] Cannot move to \`${fullDest}\`. Directory missing.`];
+                        } else {
+                            FS.writeFile(fullDest, node.content || '');
+                        }
+
+                        FS.remove(fullSrc);
+                        return [`[noats] Moved \`${fullSrc}\` to \`${fullDest}\`.`];
+                    }
+
+                    return [`[error] Unknown flag \`${flag}\` for \`mv\`!`];
                 }
 
                 // CD
