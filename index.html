@@ -69,16 +69,19 @@
     </style>
 </head>
 <body>
-    <div id="terminal">
-        <div>Welcome to LandenOS!</div>
-        <div>Type `help` for help</div>
-        <div class="line">&gt;&gt;&gt; [user @ /] $ <span class="input"></span><span class="cursor"></span></div>
-    </div>
+    <div id="terminal"></div>
 
     <script>
         let buffer = '';
         const MAX_INPUT = 76;
         const terminal = document.getElementById('terminal');
+
+        // State Machine modes: 'NORMAL', 'LOGIN_USER', 'LOGIN_PASS', 'SETUP_USER', 'SETUP_PASS', 'SUDO_PASS'
+        let appMode = 'NORMAL';
+        let pendingSudoCmd = '';
+        let tempLoginUser = '';
+        let tempSetupUser = '';
+        let currentUsername = 'user';
 
         function stripQuotes(str) {
             if (!str) return '';
@@ -98,8 +101,11 @@
             return new RegExp(regexPattern).test(str);
         }
 
-        function createLineElement(text) {
+        function createLineElement(text, isPromptLine = false) {
             const line = document.createElement('div');
+            if (isPromptLine) {
+                line.className = 'line';
+            }
             let escaped = text
                 .replace(/&/g, "&amp;")
                 .replace(/</g, "&lt;")
@@ -114,6 +120,66 @@
             return line;
         }
 
+        // --- USERS DATABASE ---
+        const USERS = {
+            STORAGE_KEY: 'landenos_users',
+
+            getUsers() {
+                try {
+                    return JSON.parse(localStorage.getItem(this.STORAGE_KEY)) || null;
+                } catch (e) {
+                    return null;
+                }
+            },
+
+            saveUsers(users) {
+                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(users));
+            },
+
+            addUser(username, password, role = 'user') {
+                const users = this.getUsers() || {};
+                users[username] = {
+                    password: password,
+                    role: role,
+                    created: Date.now()
+                };
+                this.saveUsers(users);
+            },
+
+            removeUser(username) {
+                const users = this.getUsers() || {};
+                if (users[username]) {
+                    delete users[username];
+                    this.saveUsers(users);
+                    return true;
+                }
+                return false;
+            },
+
+            verify(username, password) {
+                const users = this.getUsers() || {};
+                return users[username] && users[username].password === password;
+            },
+
+            renameUser(oldName, newName) {
+                const users = this.getUsers() || {};
+                if (!users[oldName] || users[newName]) return false;
+                users[newName] = users[oldName];
+                delete users[oldName];
+                this.saveUsers(users);
+                return true;
+            },
+
+            setPassword(username, newPassword) {
+                const users = this.getUsers() || {};
+                if (!users[username]) return false;
+                users[username].password = newPassword;
+                this.saveUsers(users);
+                return true;
+            }
+        };
+
+        // --- FILE SYSTEM ---
         const FS = {
             STORAGE_KEY: 'landenos_fs',
 
@@ -245,6 +311,31 @@
                 fs[path].modified = Date.now();
                 this.save(fs);
                 return true;
+            },
+
+            getMatchingFiles(pathPattern, cwd) {
+                let targetDir = cwd;
+                let pattern = pathPattern;
+
+                const lastSlash = pathPattern.lastIndexOf('/');
+                if (lastSlash !== -1) {
+                    const dirPart = pathPattern.substring(0, lastSlash);
+                    pattern = pathPattern.substring(lastSlash + 1);
+                    targetDir = this.normalizePath(dirPart, cwd);
+                }
+
+                const fs = this.getFS();
+                const matched = [];
+
+                for (const path in fs) {
+                    if (fs[path].type === 'file' && this.getParentPath(path) === targetDir) {
+                        const fileName = path.substring(path.lastIndexOf('/') + 1);
+                        if (matchWildcard(fileName, pattern)) {
+                            matched.push(path);
+                        }
+                    }
+                }
+                return matched;
             }
         };
 
@@ -281,17 +372,17 @@
         }
 
         const OS = {
-            version: "alpha v1.0.2.1790873943",
+            version: "alpha 1.0.3",
             sysInfo: "x86_64 Virtual Engine | 640KB Base RAM / 16MB Total | VGA Display 80x25",
             isPoweredOn: true,
             cwd: "/",
             clipboard: null,
 
             getPrompt() {
-                return `>>> [user @ ${this.cwd}] $ `;
+                return `>>> [${currentUsername} @ ${this.cwd}] $ `;
             },
 
-            executeSingle(input, pipedData = null) {
+            executeSingle(input, pipedData = null, isSudo = false) {
                 if (!this.isPoweredOn) return null;
                 const raw = input.trim();
                 if (!raw) return [];
@@ -322,6 +413,8 @@
                             '  dir         - Inspect, create, or remove directories',
                             '  iwf         - In/Write file contents',
                             '  mv          - Move, copy, paste, or duplicate files',
+                            '  user        - Manage user account and credentials',
+                            '  sudo `cmd`  - Run command with elevated administrative rights',
                             '  cd          - Change current working directory'
                         ];
                     }
@@ -342,7 +435,7 @@
                         const targetCmd = stripQuotes(args.split(' ')[0]);
                         const flag = stripQuotes(args.substring(args.indexOf(' ') + 1));
 
-                        const validCommands = ['help', 'cleans', 'echo', 'time', 'test', 'boot', 'sys', 'list', 'file', 'dir', 'iwf', 'mv', 'cd'];
+                        const validCommands = ['help', 'cleans', 'echo', 'time', 'test', 'boot', 'sys', 'list', 'file', 'dir', 'iwf', 'mv', 'user', 'sudo', 'cd'];
                         if (!validCommands.includes(targetCmd)) {
                             return [`[error] \`${targetCmd}\` is not a command!`];
                         }
@@ -360,6 +453,8 @@
                             if (targetCmd === 'dir') return ['dir - Inspect or manage directories. Usage: dir `path` [-r|-c|-h]'];
                             if (targetCmd === 'iwf') return ['iwf - Read, write, or clear file contents. Usage: iwf [-r|-w|-c|-h] `path` [`content`]'];
                             if (targetCmd === 'mv') return ['mv - Move, copy, paste, or duplicate files. Usage: mv `src` `dest` | mv -c `path` | mv -p `path` | mv -d `src` `dest`'];
+                            if (targetCmd === 'user') return ['user - Display or manage user info. Usage: user [-n|-a|-r|-p|-h]'];
+                            if (targetCmd === 'sudo') return ['sudo - Execute command with elevated rights. Usage: sudo `command`'];
                             if (targetCmd === 'cd') return ['cd - Changes directory or goes back with `cd .`. Usage: cd `path` | cd . [-h]'];
                         } else if (flag === '-f') {
                             if (targetCmd === 'help') return ['Flags for `help`:', '  -f - List flags', '  -h - Command help'];
@@ -374,6 +469,8 @@
                             if (targetCmd === 'dir') return ['Flags for `dir`:', '  -r - Remove directory', '  -c - Create directory', '  -h - Command help'];
                             if (targetCmd === 'iwf') return ['Flags for `iwf`:', '  -r - Read contents', '  -w - Write content', '  -c - Clear content', '  -h - Command help'];
                             if (targetCmd === 'mv') return ['Flags for `mv`:', '  -c - Copy file to clipboard', '  -p - Paste file from clipboard', '  -d - Duplicate file to path', '  -h - Command help'];
+                            if (targetCmd === 'user') return ['Flags for `user`:', '  -n - Change username (sudo if target != self)', '  -a - Add user', '  -r - Remove user (requires sudo)', '  -p - Change password (requires sudo)', '  -h - Command help'];
+                            if (targetCmd === 'sudo') return ['Flags for `sudo`:', '  -h - Command help'];
                             if (targetCmd === 'cd') return ['Flags for `cd`:', '  -h - Command help'];
                         } else {
                             return [`[error] Unknown flag \`${flag}\` for \`help \`${targetCmd}\`\`!`];
@@ -383,6 +480,120 @@
                         return [`[error] Unknown flag \`${args}\` for \`help\`!`];
                     }
                     return [`[error] The command \`${cmd}\` received invalid arguments!`];
+                }
+
+                // USER
+                if (cmd === 'user') {
+                    if (args === '-h') {
+                        return ['user - User management. Usage: user | user -n `new_name` [`target_user`] | user -a `username` `password` | user -r `username` | user -p [`username`] `new_password`'];
+                    }
+
+                    let flag = '';
+                    let restArgs = args;
+
+                    if (args.startsWith('-')) {
+                        const spaceIdx = args.indexOf(' ');
+                        if (spaceIdx !== -1) {
+                            flag = args.substring(0, spaceIdx).trim();
+                            restArgs = args.substring(spaceIdx + 1).trim();
+                        } else {
+                            flag = args.trim();
+                            restArgs = '';
+                        }
+                    }
+
+                    // Display user info
+                    if (!flag) {
+                        const users = USERS.getUsers() || {};
+                        const uInfo = users[currentUsername] || { role: 'user', created: Date.now() };
+                        return [
+                            `--- User Profile ---`,
+                            `Username : ${currentUsername}`,
+                            `Role     : ${uInfo.role}`,
+                            `Created  : ${new Date(uInfo.created).toLocaleString()}`
+                        ];
+                    }
+
+                    // user -n: change name
+                    if (flag === '-n') {
+                        const parts = extractPathArgs(restArgs);
+                        if (parts.length === 0) return [`[error] Command \`user -n\` requires a new username!`];
+                        
+                        let target = currentUsername;
+                        let newName = parts[0];
+
+                        if (parts.length >= 2) {
+                            newName = parts[0];
+                            target = parts[1];
+                        }
+
+                        if (target !== currentUsername && !isSudo) {
+                            return [`[error] Permission denied! Changing another user's name requires sudo.`];
+                        }
+
+                        const ok = USERS.renameUser(target, newName);
+                        if (!ok) return [`[error] Could not rename user \`${target}\`! Target name may already exist or user missing.`];
+
+                        if (target === currentUsername) {
+                            currentUsername = newName;
+                        }
+                        return [`[noats] Successfully changed user \`${target}\` name to \`${newName}\`.`];
+                    }
+
+                    // user -a: add user
+                    if (flag === '-a') {
+                        const parts = extractPathArgs(restArgs);
+                        if (parts.length < 2) return [`[error] Command \`user -a\` requires both username and password!`];
+                        const newU = parts[0];
+                        const newP = parts[1];
+
+                        const users = USERS.getUsers() || {};
+                        if (users[newU]) return [`[warng] User \`${newU}\` already exists!`];
+
+                        USERS.addUser(newU, newP, 'user');
+                        return [`[noats] User \`${newU}\` created successfully.`];
+                    }
+
+                    // user -r: remove user (requires sudo)
+                    if (flag === '-r') {
+                        if (!isSudo) {
+                            return [`[error] Permission denied! Removing users requires sudo.`];
+                        }
+                        const parts = extractPathArgs(restArgs);
+                        if (parts.length === 0) return [`[error] Command \`user -r\` requires a target username!`];
+                        const target = parts[0];
+
+                        if (target === currentUsername) {
+                            return [`[error] Cannot remove currently active user!`];
+                        }
+
+                        const ok = USERS.removeUser(target);
+                        if (!ok) return [`[error] User \`${target}\` does not exist!`];
+                        return [`[noats] User \`${target}\` removed successfully.`];
+                    }
+
+                    // user -p: change password (requires sudo)
+                    if (flag === '-p') {
+                        if (!isSudo) {
+                            return [`[error] Permission denied! Changing passwords requires sudo.`];
+                        }
+                        const parts = extractPathArgs(restArgs);
+                        if (parts.length === 0) return [`[error] Command \`user -p\` requires a new password!`];
+
+                        let target = currentUsername;
+                        let newPass = parts[0];
+
+                        if (parts.length >= 2) {
+                            target = parts[0];
+                            newPass = parts[1];
+                        }
+
+                        const ok = USERS.setPassword(target, newPass);
+                        if (!ok) return [`[error] User \`${target}\` does not exist!`];
+                        return [`[noats] Password updated for user \`${target}\`.`];
+                    }
+
+                    return [`[error] Unknown flag \`${flag}\` for \`user\`!`];
                 }
 
                 // CLEANS
@@ -475,7 +686,7 @@
                     }
                     if (args === '-t') {
                         terminal.innerHTML = '<div>Welcome to LandenOS!</div><div>Type `help` for help</div>';
-                        return this.executeSingle('test');
+                        return this.executeSingle('test', null, isSudo);
                     }
                     if (args === '-h') {
                         return ['boot - System power management. Flags: (none) turn off, -r (reboot), -t (reboot and test), -h (help)'];
@@ -511,7 +722,7 @@
 
                     const fs = FS.getFS();
                     const cwdPath = this.cwd;
-                    const children = [];
+                    let children = [];
 
                     for (const path in fs) {
                         if (path === '/') continue;
@@ -520,6 +731,13 @@
                             const name = path.substring(path.lastIndexOf('/') + 1);
                             children.push({ name, path, ...fs[path] });
                         }
+                    }
+
+                    if (args && args.includes('*')) {
+                        const pattern = stripQuotes(args);
+                        children = children.filter(c => matchWildcard(c.name, pattern));
+                        if (children.length === 0) return [`[warng] No items matched \`${pattern}\`!`];
+                        return children.map(c => c.type === 'dir' ? `[DIR]  ${c.name}/` : `[FILE] ${c.name}`);
                     }
 
                     if (!args) {
@@ -599,35 +817,31 @@
                         return [`[error] Command \`file\` requires a file path argument!`];
                     }
 
-                    // Wildcard handling for file removal (e.g. file -r `*.txt`)
-                    if (flag === '-r' && pathArg.includes('*')) {
-                        let targetDir = this.cwd;
-                        let pattern = pathArg;
+                    // Wildcard handling for file commands (e.g. file -r `*.txt`, file -e `*.txt`, file `*.txt`)
+                    if (pathArg.includes('*')) {
+                        const matchedFiles = FS.getMatchingFiles(pathArg, this.cwd);
 
-                        const lastSlash = pathArg.lastIndexOf('/');
-                        if (lastSlash !== -1) {
-                            const dirPart = pathArg.substring(0, lastSlash);
-                            pattern = pathArg.substring(lastSlash + 1);
-                            targetDir = FS.normalizePath(dirPart, this.cwd);
+                        if (flag === '-r') {
+                            if (matchedFiles.length === 0) return [`[warng] No files matched pattern \`${pathArg}\`!`];
+                            matchedFiles.forEach(f => FS.remove(f));
+                            return [`[noats] Removed ${matchedFiles.length} file(s) matching \`${pathArg}\`.`];
                         }
 
-                        const fs = FS.getFS();
-                        const removedFiles = [];
-
-                        for (const path in fs) {
-                            if (fs[path].type === 'file' && FS.getParentPath(path) === targetDir) {
-                                const fileName = path.substring(path.lastIndexOf('/') + 1);
-                                if (matchWildcard(fileName, pattern)) {
-                                    FS.remove(path);
-                                    removedFiles.push(path);
-                                }
-                            }
+                        if (flag === '-e') {
+                            return [`[noats] Matching files found (${matchedFiles.length}): ${matchedFiles.length > 0}`];
                         }
 
-                        if (removedFiles.length === 0) {
-                            return [`[warng] No files matched pattern \`${pathArg}\`!`];
+                        if (!flag) {
+                            if (matchedFiles.length === 0) return [`[warng] No files matched pattern \`${pathArg}\`!`];
+                            const outputs = [`Matched ${matchedFiles.length} file(s) for \`${pathArg}\`:`];
+                            matchedFiles.forEach(fullPath => {
+                                const node = FS.getNode(fullPath);
+                                const filename = fullPath.substring(fullPath.lastIndexOf('/') + 1);
+                                const size = node.content ? node.content.length : 0;
+                                outputs.push(`  - ${filename} (${size} bytes)`);
+                            });
+                            return outputs;
                         }
-                        return [`[noats] Removed ${removedFiles.length} file(s) matching \`${pathArg}\`.`];
                     }
 
                     const fullPath = FS.normalizePath(pathArg, this.cwd);
@@ -969,7 +1183,7 @@
                 return [`[error] \`${cmd}\` is not a command! Type \`help\` for a list of commands.`];
             },
 
-            executePipeline(pipelineStr) {
+            executePipeline(pipelineStr, isSudo = false) {
                 const pipeCmds = [];
                 let current = '';
                 let inBacktick = false;
@@ -992,7 +1206,7 @@
 
                 for (const cmdStr of pipeCmds) {
                     if (!cmdStr.trim()) continue;
-                    currentOutput = this.executeSingle(cmdStr, currentOutput);
+                    currentOutput = this.executeSingle(cmdStr, currentOutput, isSudo);
                     if (currentOutput === null) {
                         break;
                     }
@@ -1004,8 +1218,21 @@
                 return currentOutput;
             },
 
-            execute(input) {
+            execute(input, isSudo = false) {
                 if (!this.isPoweredOn) return null;
+
+                const trimmed = input.trim();
+                
+                // Handle sudo invocation directly
+                if (!isSudo && (trimmed === 'sudo' || trimmed.startsWith('sudo '))) {
+                    const targetCmd = trimmed.substring(4).trim();
+                    if (!targetCmd) {
+                        return ['[error] `sudo` requires a command argument! Usage: sudo `command`'];
+                    }
+                    pendingSudoCmd = targetCmd;
+                    appMode = 'SUDO_PASS';
+                    return null; // Will trigger password prompt in key handler
+                }
 
                 let checkBacktick = false;
                 for (let i = 0; i < input.length - 1; i++) {
@@ -1047,7 +1274,7 @@
 
                 for (const cmdStr of rawCommands) {
                     if (!cmdStr.trim()) continue;
-                    const output = this.executePipeline(cmdStr);
+                    const output = this.executePipeline(cmdStr, isSudo);
                     if (output === null) {
                         combinedOutput = [];
                         isCleared = true;
@@ -1065,6 +1292,33 @@
 
         function scrollToBottom() {
             terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function createPromptLine(label, isPassword = false) {
+            const div = document.createElement('div');
+            div.className = 'line';
+            div.dataset.isPassword = isPassword ? 'true' : 'false';
+            div.innerHTML = `${label}<span class="input"></span><span class="cursor"></span>`;
+            terminal.appendChild(div);
+            scrollToBottom();
+        }
+
+        function initApp() {
+            terminal.innerHTML = '<div>Welcome to LandenOS!</div>';
+            const users = USERS.getUsers();
+
+            if (!users || Object.keys(users).length === 0) {
+                // New system setup
+                const msg = document.createElement('div');
+                msg.textContent = 'Initial system setup required.';
+                terminal.appendChild(msg);
+                appMode = 'SETUP_USER';
+                createPromptLine('username: ');
+            } else {
+                // Login required
+                appMode = 'LOGIN_USER';
+                createPromptLine('username: ');
+            }
         }
 
         window.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
@@ -1093,40 +1347,135 @@
 
                 const inputSpan = activeLine.querySelector('.input');
                 const cursor = activeLine.querySelector('.cursor');
+                const isPasswordMode = activeLine.dataset.isPassword === 'true';
 
                 if (e.key === 'Enter') {
                     if (cursor) cursor.remove();
-                    
-                    const output = OS.execute(buffer);
-                    if (output !== null && OS.isPoweredOn) {
-                        output.forEach(text => {
-                            const line = createLineElement(text);
-                            terminal.appendChild(line);
-                        });
-                    }
-
-                    if (OS.isPoweredOn) {
-                        const nextLine = document.createElement('div');
-                        nextLine.className = 'line';
-                        nextLine.innerHTML = `&gt;&gt;&gt; [user @ ${OS.cwd}] $ <span class="input"></span><span class="cursor"></span>`;
-                        terminal.appendChild(nextLine);
-                    }
-
+                    const enteredText = buffer;
                     buffer = '';
-                    scrollToBottom();
+
+                    // 1. SETUP USERNAME
+                    if (appMode === 'SETUP_USER') {
+                        if (!enteredText.trim()) {
+                            createPromptLine('username: ');
+                            return;
+                        }
+                        tempSetupUser = enteredText.trim();
+                        appMode = 'SETUP_PASS';
+                        createPromptLine('password: ', true);
+                        return;
+                    }
+
+                    // 2. SETUP PASSWORD
+                    if (appMode === 'SETUP_PASS') {
+                        USERS.addUser(tempSetupUser, enteredText, 'admin');
+                        currentUsername = tempSetupUser;
+                        appMode = 'NORMAL';
+
+                        const info = createLineElement(`[noats] Account \`${currentUsername}\` created. Logged in.`);
+                        terminal.appendChild(info);
+                        const helpHint = createLineElement('Type `help` for help');
+                        terminal.appendChild(helpHint);
+
+                        createPromptLine(OS.getPrompt());
+                        return;
+                    }
+
+                    // 3. LOGIN USERNAME
+                    if (appMode === 'LOGIN_USER') {
+                        tempLoginUser = enteredText.trim();
+                        appMode = 'LOGIN_PASS';
+                        createPromptLine('password: ', true);
+                        return;
+                    }
+
+                    // 4. LOGIN PASSWORD
+                    if (appMode === 'LOGIN_PASS') {
+                        if (USERS.verify(tempLoginUser, enteredText)) {
+                            currentUsername = tempLoginUser;
+                            appMode = 'NORMAL';
+
+                            const info = createLineElement(`[noats] Logged in as \`${currentUsername}\`.`);
+                            terminal.appendChild(info);
+                            const helpHint = createLineElement('Type `help` for help');
+                            terminal.appendChild(helpHint);
+
+                            createPromptLine(OS.getPrompt());
+                        } else {
+                            const err = createLineElement('[error] Invalid username or password!');
+                            terminal.appendChild(err);
+                            appMode = 'LOGIN_USER';
+                            createPromptLine('username: ');
+                        }
+                        return;
+                    }
+
+                    // 5. SUDO PASSWORD PROMPT
+                    if (appMode === 'SUDO_PASS') {
+                        if (USERS.verify(currentUsername, enteredText)) {
+                            appMode = 'NORMAL';
+                            const output = OS.execute(pendingSudoCmd, true);
+                            pendingSudoCmd = '';
+
+                            if (output !== null && OS.isPoweredOn) {
+                                output.forEach(text => {
+                                    const line = createLineElement(text);
+                                    terminal.appendChild(line);
+                                });
+                            }
+                        } else {
+                            appMode = 'NORMAL';
+                            pendingSudoCmd = '';
+                            const err = createLineElement('[error] Incorrect password!');
+                            terminal.appendChild(err);
+                        }
+
+                        if (OS.isPoweredOn) {
+                            createPromptLine(OS.getPrompt());
+                        }
+                        return;
+                    }
+
+                    // 6. NORMAL TERMINAL EXECUTION
+                    if (appMode === 'NORMAL') {
+                        const output = OS.execute(enteredText, false);
+
+                        if (appMode === 'SUDO_PASS') {
+                            createPromptLine(`[sudo] password for ${currentUsername}: `, true);
+                            return;
+                        }
+
+                        if (output !== null && OS.isPoweredOn) {
+                            output.forEach(text => {
+                                const line = createLineElement(text);
+                                terminal.appendChild(line);
+                            });
+                        }
+
+                        if (OS.isPoweredOn) {
+                            createPromptLine(OS.getPrompt());
+                        }
+                    }
+
                 } else if (e.key === 'Backspace') {
                     buffer = buffer.slice(0, -1);
-                    if (inputSpan) inputSpan.textContent = buffer;
+                    if (inputSpan) {
+                        inputSpan.textContent = isPasswordMode ? '*'.repeat(buffer.length) : buffer;
+                    }
                     scrollToBottom();
                 } else if (e.key.length === 1) {
                     if (buffer.length < MAX_INPUT) {
                         buffer += e.key;
-                        if (inputSpan) inputSpan.textContent = buffer;
+                        if (inputSpan) {
+                            inputSpan.textContent = isPasswordMode ? '*'.repeat(buffer.length) : buffer;
+                        }
                         scrollToBottom();
                     }
                 }
             }
         }, true);
+
+        initApp();
     </script>
 </body>
 </html>
